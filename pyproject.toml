@@ -1,0 +1,66 @@
+[tool.poetry]
+name = "theia"
+version = "0.1.0"
+description = "Theia: Bleed-Through Correction in Fluorescent Microscopy Images"
+authors = [
+  "Najib Ishaq <najib.ishaq@nih.gov>",
+  "Nicholas Schaub <nick.schaub@nih.org>"
+]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^3.2.1"
+black = "23.1.0"
+ruff = "0.0.259"
+mypy = "^1.1.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+# ruff configuration
+[tool.ruff]
+select = [
+  "F",  # pyflakes
+  "E",  # pycodestyle errors
+  "W",  # pycodestyle warnings
+  "C90",  # mccabe
+  "I",  # isort
+  "N",  # pep8-naming
+  "D",  # pydocstyle
+  "UP",  # pyupgrade
+  "ANN",  # flake8-annotations
+  "S",  # flake8-bandit
+  "BLE",  # flake8-blind-except
+  "FBT",  # flake8-boolean-trap
+  "B",  # flake8-bugbear
+  "A",  # flake8-builtins
+  "COM",  # flake8-commas
+  "C4",  # flake8-comprehensions
+  "EM",  # flake8-errmsg
+  "RET",  # flake8-return
+  "PTH",  # flake8-use-pathlib
+  "PL",  # pyline
+  "NPY",  # NumPy-specific rules
+  "RUF",  # Ruff-specific rules
+]
+ignore = []
+unfixable = ["B"]  # Avoid trying to fix flake8-bugbear violations.
+target-version = "py39"  # Assume Python 3.9.
+
+[tool.ruff.mccabe]
+# Unlike Flake8, default to a complexity level of 10.
+max-complexity = 10
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+# Ignore `E402` (import violations) in all `__init__.py` files.
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["E402"]
+
+[tool.ruff.isort]
+force-single-line = true
