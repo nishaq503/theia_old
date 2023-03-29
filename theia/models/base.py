@@ -79,23 +79,14 @@ class Theia(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def save(
-        self,  # noqa
-        path: pathlib.Path,
-        *args: list[typing.Any],
-        **kwargs: dict[str, typing.Any],
-    ) -> None:
+    def save(self, path: pathlib.Path) -> None:  # noqa
         """Save the model to the given `path`."""
         pass
 
     @staticmethod
     @abc.abstractmethod
-    def load(
-        path: pathlib.Path,
-        *args: list[typing.Any],
-        **kwargs: dict[str, typing.Any],
-    ) -> "Theia":
-        """Load the model from the given path."""
+    def load(path: pathlib.Path) -> "Theia":
+        """Load the model from the given `path`."""
         pass
 
     @property
