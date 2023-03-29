@@ -9,8 +9,13 @@ authors = [
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.9,<3.12"
+tensorflow-macos = {version = "^2.11.0", platform = "darwin"}
+tensorflow-metal = {version = "^0.7.1", platform = "darwin"}
+tensorflow = {version = "^2.11.1", platform = "linux"}
+keras = "^2.11.0"
 numpy = "^1.24.2"
+scikit-learn = "^1.2.2"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^3.2.1"
