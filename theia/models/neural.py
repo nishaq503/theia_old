@@ -9,7 +9,10 @@ from tensorflow.python.keras import callbacks
 from tensorflow.python.keras import layers
 from tensorflow.python.keras import metrics
 
+from ..data import TileGenerator
 from .base import Theia
+
+__all__ = ["Neural"]
 
 
 class Neural(Theia, keras.Model):  # type: ignore
@@ -119,13 +122,53 @@ class Neural(Theia, keras.Model):  # type: ignore
         """Side-length of square tiles to use as inputs to the network."""
         return self._tile_shape[0]
 
-    def fit(
+    def fit_theia(  # type: ignore
         self,
-        *args: list[typing.Any],
-        **kwargs: dict[str, typing.Any],
+        *,
+        train_gen: TileGenerator,
+        valid_gen: TileGenerator,
+        epochs: int,
+        verbose: str,
     ) -> None:
-        """Fit Theia to a multi-channel image."""
-        pass
+        """Fit Theia to a multichannel image.
+
+        Args:
+            train_gen: The tiles to train on.
+            valid_gen: The tiles to validate on.
+            epochs: The number of epochs to train the model.
+            verbose: verbosity mode.
+        """
+        self.fit(
+            x=train_gen,
+            epochs=epochs,
+            verbose=verbose,
+            callbacks=self._callbacks,
+            validation_data=valid_gen,
+        )
+
+        random_inputs = [
+            numpy.random.random((1, *self._tile_shape))
+            for _ in range(self._num_channels)
+        ]
+        outputs = self(random_inputs)
+
+        kernels: numpy.ndarray = numpy.squeeze(
+            numpy.stack(
+                [k for out in outputs for k in tensorflow.unstack(out[-1])],
+                axis=0,
+            ),
+        ).astype(numpy.float32)
+        named_kernels = {
+            name: kernels[i, ...] for i, name in enumerate(self._kernel_names)
+        }
+
+        self._contribution_kernels = {
+            (i, j): k for (b, i, j), k in named_kernels.items() if b
+        }
+
+        self._interaction_kernels = {
+            (i, j): k for (b, i, j), k in named_kernels.items() if not b
+        }
 
     def early_stopping(
         self,
@@ -160,23 +203,6 @@ class Neural(Theia, keras.Model):  # type: ignore
 
     def add_callback(self, cb: callbacks.Callback) -> None:  # noqa
         self._callbacks.append(cb)
-
-    def transform(
-        self,
-        image: numpy.ndarray,
-        *,
-        remove_interactions: bool = False,
-    ) -> numpy.ndarray:
-        """Correct and return the input image.
-
-        Args:
-            image: to be corrected for bleed-through.
-            remove_interactions: whether to remove interaction terms.
-
-        Returns:
-            The corrected image.
-        """
-        pass
 
     def save(self, path: pathlib.Path) -> None:
         """Save the model to the given `path`."""

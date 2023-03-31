@@ -6,8 +6,6 @@ import typing
 
 import numpy
 
-from ..utils import constants
-
 
 class Theia(abc.ABC):
     """The base model for Theia.
@@ -16,7 +14,7 @@ class Theia(abc.ABC):
     """
 
     def __init__(
-        self,  # noqa
+        self,
         *,
         num_channels: int,
         channel_overlap: int,
@@ -41,27 +39,25 @@ class Theia(abc.ABC):
         self._alpha = alpha
         self._beta = beta
 
-        self._num_pixels = max(
-            constants.MAX_DATA_SIZE
-            // (4 * (kernel_size**2) * self._channel_overlap * 2),
-            constants.MIN_DATA_SIZE,
-        )
-
         self._contribution_kernels: dict[tuple[int, int], numpy.ndarray] = {}
         self._interaction_kernels: dict[tuple[int, int], numpy.ndarray] = {}
 
+    @property
+    def num_channels(self) -> int:
+        """The number of channels in each image."""
+        return self._num_channels
+
     @abc.abstractmethod
-    def fit(
-        self,  # noqa
+    def fit_theia(
+        self,
         *args: list[typing.Any],
         **kwargs: dict[str, typing.Any],
     ) -> None:
         """Fit Theia to a multi-channel image."""
         pass
 
-    @abc.abstractmethod
     def transform(
-        self,  # noqa
+        self,
         image: numpy.ndarray,
         *,
         remove_interactions: bool = False,
@@ -76,10 +72,10 @@ class Theia(abc.ABC):
         Returns:
             The corrected image.
         """
-        pass
+        raise NotImplementedError
 
     @abc.abstractmethod
-    def save(self, path: pathlib.Path) -> None:  # noqa
+    def save(self, path: pathlib.Path) -> None:
         """Save the model to the given `path`."""
         pass
 
@@ -90,7 +86,7 @@ class Theia(abc.ABC):
         pass
 
     @property
-    def contribution_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:  # noqa
+    def contribution_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
         """Return the fitted contribution kernels."""
         if len(self._contribution_kernels) == 0:
             message = "Please call `fit` before using this property."
@@ -98,7 +94,7 @@ class Theia(abc.ABC):
         return self._contribution_kernels
 
     @property
-    def interaction_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:  # noqa
+    def interaction_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
         """Return the fitted interaction kernels."""
         if len(self._interaction_kernels) == 0:
             message = "Please call `fit` before using this property."
