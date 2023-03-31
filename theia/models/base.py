@@ -5,6 +5,7 @@ import pathlib
 import typing
 
 import numpy
+import scipy.ndimage
 
 
 class Theia(abc.ABC):
@@ -47,6 +48,11 @@ class Theia(abc.ABC):
         """The number of channels in each image."""
         return self._num_channels
 
+    @property
+    def channel_overlap(self) -> int:
+        """The number of adjacent channels to use for bleed-through estimation."""
+        return self._channel_overlap
+
     @abc.abstractmethod
     def fit_theia(
         self,
@@ -55,24 +61,6 @@ class Theia(abc.ABC):
     ) -> None:
         """Fit Theia to a multi-channel image."""
         pass
-
-    def transform(
-        self,
-        image: numpy.ndarray,
-        *,
-        remove_interactions: bool = False,
-    ) -> numpy.ndarray:
-        """Transform and return a multichannel image.
-
-        Args:
-            image: A multichannel image with shape (H, W, C) where H is the
-             height, W is the width and C is the number of channels.
-            remove_interactions: Whether to remove interaction components.
-
-        Returns:
-            The corrected image.
-        """
-        raise NotImplementedError
 
     @abc.abstractmethod
     def save(self, path: pathlib.Path) -> None:
@@ -100,3 +88,70 @@ class Theia(abc.ABC):
             message = "Please call `fit` before using this property."
             raise ValueError(message)
         return self._interaction_kernels
+
+    def transform(
+        self,
+        image: numpy.ndarray,
+        *,
+        remove_interactions: bool = False,
+    ) -> numpy.ndarray:
+        """Transform and return a multichannel image.
+
+        Args:
+            image: A multichannel image with shape (H, W, C) where H is the
+             height, W is the width and C is the number of channels.
+            remove_interactions: Whether to remove interaction components.
+
+        Returns:
+            The corrected image.
+        """
+        corrected_image = numpy.zeros_like(image)
+
+        for i_target in range(self.num_channels):
+            target = image[:, :, i_target]
+
+            neighbor_indices = self._neighbor_indices(i_target)
+
+            neighbors = [image[:, :, i] for i in neighbor_indices]
+            kernels = [
+                self.contribution_kernels[(i_target, i)] for i in neighbor_indices
+            ]
+            bleed_through = _compute_contribution(neighbors, kernels)
+
+            if remove_interactions:
+                interactions = [self._compute_interaction(target, n) for n in neighbors]
+                kernels = [
+                    self.interaction_kernels[(i_target, i)] for i in neighbor_indices
+                ]
+                interaction = _compute_contribution(interactions, kernels)
+                bleed_through += interaction
+
+            corrected_image[:, :, i_target] = numpy.clip(
+                target - bleed_through,
+                a_min=0.0,
+            )
+
+        return corrected_image
+
+    def _neighbor_indices(self, i_target: int) -> list[int]:
+        min_i = max(i_target - self.channel_overlap, 0)
+        max_i = min(i_target + self.channel_overlap, self.num_channels)
+        return [i for i in range(min_i, max_i) if i != i_target]
+
+    def _compute_interaction(
+        self,
+        target: numpy.ndarray,
+        neighbor: numpy.ndarray,
+    ) -> numpy.ndarray:
+        interaction = numpy.power(neighbor, self._beta)
+        interaction = numpy.multiply(target, interaction)
+        interaction = numpy.power(interaction, 1 / (1 + self._beta))
+        return interaction
+
+
+def _compute_contribution(
+    neighbors: list[numpy.ndarray],
+    kernels: list[numpy.ndarray],
+) -> numpy.ndarray:
+    correlations = [scipy.ndimage.correlate(n, k) for n, k in zip(neighbors, kernels)]
+    return numpy.sum(numpy.stack(correlations, axis=0), axis=0)
