@@ -122,13 +122,22 @@ class Neural(Theia, keras.Model):  # type: ignore
         """Side-length of square tiles to use as inputs to the network."""
         return self._tile_shape[0]
 
+    def build(self, _: typing.Optional[str] = None) -> None:
+        """Default build of Neural Network."""
+        super().build(
+            [
+                (None, self.tile_size, self.tile_size, 1)
+                for _ in range(self.num_channels)
+            ],
+        )
+
     def fit_theia(  # type: ignore
         self,
         *,
         train_gen: TileGenerator,
         valid_gen: TileGenerator,
         epochs: int,
-        verbose: str,
+        verbose: int,
     ) -> None:
         """Fit Theia to a multichannel image.
 
@@ -223,6 +232,43 @@ class Neural(Theia, keras.Model):  # type: ignore
     ) -> list[tuple[tensorflow.Tensor, tensorflow.Tensor]]:
         """Call the model."""
         return self._model(inputs)  # type: ignore
+
+    def train_step(self, inputs: list[tensorflow.Tensor]) -> dict[str, float]:
+        """Take one step of training the model."""
+        with tensorflow.GradientTape() as tape:
+            losses = self._compute_loss(inputs)
+
+        trainable_weights = self._model.trainable_weights
+        gradients = tape.gradient(losses, trainable_weights)
+        self.optimizer.apply_gradients(zip(gradients, trainable_weights))
+
+        self.loss_tracker.update_state(tensorflow.reduce_mean(losses))
+        return {self.loss_tracker.name: self.loss_tracker.result()}
+
+    def test_step(self, inputs: list[tensorflow.Tensor]) -> dict[str, float]:
+        """Take one step of testing/validating the model."""
+        losses = self._compute_loss(inputs)
+        self.loss_tracker.update_state(tensorflow.reduce_mean(losses))
+        return {self.loss_tracker.name: self.loss_tracker.result()}
+
+    def _compute_loss(self, inputs: list[tensorflow.Tensor]) -> list[tensorflow.Tensor]:
+        losses = []
+
+        for n, (corrected, kernels) in zip(self._num_kernels, self._model(inputs)):
+            sq_error = tensorflow.reduce_mean(tensorflow.square(corrected))
+
+            kernel_stack = tensorflow.abs(tensorflow.stack(kernels))
+            l1_penalty = self._alpha * tensorflow.reduce_mean(kernel_stack)
+
+            loss = tensorflow.maximum(sq_error + l1_penalty, 0.0)
+            losses.extend([loss] * n)
+
+        return losses
+
+    @property
+    def metrics(self) -> list[metrics.Metric]:
+        """Metric to track."""
+        return [self.loss_tracker]
 
     def get_config(self) -> None:  # noqa
         raise NotImplementedError

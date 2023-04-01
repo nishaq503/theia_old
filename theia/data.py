@@ -44,7 +44,8 @@ class TileGenerator(keras_utils.Sequence):  # type: ignore
         if normalize:
             images = list(map(_normalize_image, images))
         self._images = [
-            tensorflow.Tensor(image, dtype=tensorflow.float32) for image in images
+            tensorflow.convert_to_tensor(image, dtype=tensorflow.float32)
+            for image in images
         ]
 
         self._tile_shape = (tile_size, tile_size, c)
@@ -95,8 +96,8 @@ class TileGenerator(keras_utils.Sequence):  # type: ignore
 
 
 def _normalize_image(image: numpy.ndarray) -> numpy.ndarray:
-    min_val = numpy.min(image, axis=-1)
-    max_val = numpy.max(image, axis=-1)
+    min_val = numpy.min(image, axis=(0, 1))
+    max_val = numpy.max(image, axis=(0, 1))
     image = image.astype(numpy.float32) - min_val
     image /= max_val - min_val + constants.EPSILON
     return image
