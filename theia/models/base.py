@@ -89,6 +89,41 @@ class Theia(abc.ABC):
             raise ValueError(message)
         return self._interaction_kernels
 
+    def bleedthrough_component(self, image: numpy.ndarray) -> numpy.ndarray:
+        """Compute the bleed-through components for the image."""
+        bleed_through = numpy.zeros_like(image)
+
+        for i_target in range(self.num_channels):
+            neighbor_indices = self._neighbor_indices(i_target)
+
+            neighbors = [image[:, :, i] for i in neighbor_indices]
+            kernels = [
+                self.contribution_kernels[(i_target, i)] for i in neighbor_indices
+            ]
+
+            bleed_through[:, :, i_target] = _compute_contribution(neighbors, kernels)
+
+        return bleed_through
+
+    def interaction_component(self, image: numpy.ndarray) -> numpy.ndarray:
+        """Compute the interaction components for the image."""
+        interaction = numpy.zeros_like(image)
+
+        for i_target in range(self.num_channels):
+            target = image[:, :, i_target]
+
+            neighbor_indices = self._neighbor_indices(i_target)
+
+            neighbors = [image[:, :, i] for i in neighbor_indices]
+            interactions = [self._compute_interaction(target, n) for n in neighbors]
+            kernels = [
+                self.interaction_kernels[(i_target, i)] for i in neighbor_indices
+            ]
+
+            interaction[:, :, i_target] = _compute_contribution(interactions, kernels)
+
+        return interaction
+
     def transform(
         self,
         image: numpy.ndarray,
@@ -105,33 +140,12 @@ class Theia(abc.ABC):
         Returns:
             The corrected image.
         """
-        corrected_image = numpy.zeros_like(image)
+        bleed_through = self.bleedthrough_component(image)
 
-        for i_target in range(self.num_channels):
-            target = image[:, :, i_target]
+        if remove_interactions:
+            bleed_through += self.interaction_component(image)
 
-            neighbor_indices = self._neighbor_indices(i_target)
-
-            neighbors = [image[:, :, i] for i in neighbor_indices]
-            kernels = [
-                self.contribution_kernels[(i_target, i)] for i in neighbor_indices
-            ]
-            bleed_through = _compute_contribution(neighbors, kernels)
-
-            if remove_interactions:
-                interactions = [self._compute_interaction(target, n) for n in neighbors]
-                kernels = [
-                    self.interaction_kernels[(i_target, i)] for i in neighbor_indices
-                ]
-                interaction = _compute_contribution(interactions, kernels)
-                bleed_through += interaction
-
-            corrected_image[:, :, i_target] = numpy.clip(
-                target - bleed_through,
-                a_min=0.0,
-            )
-
-        return corrected_image
+        return numpy.clip(image - bleed_through, a_min=0.0)
 
     def _neighbor_indices(self, i_target: int) -> list[int]:
         min_i = max(i_target - self.channel_overlap, 0)
