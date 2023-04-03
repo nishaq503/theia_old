@@ -201,7 +201,7 @@ class Neural(Theia, keras.Model):  # type: ignore
         """
         self._callbacks.append(
             callbacks.EarlyStopping(
-                monitor="theia_loss",
+                monitor="val_theia_loss",
                 min_delta=min_delta,
                 patience=patience,
                 verbose=verbose,
