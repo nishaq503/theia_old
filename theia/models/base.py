@@ -89,6 +89,71 @@ class Theia(abc.ABC):
             raise ValueError(message)
         return self._interaction_kernels
 
+    @property
+    def transformer(self) -> "Transformer":
+        """Provide a thread-safe transformer to apply bleed-through correction."""
+        return Transformer(
+            num_channels=self.num_channels,
+            channel_overlap=self.channel_overlap,
+            beta=self._beta,
+            contribution_kernels=self.contribution_kernels,
+            interaction_kernels=self.interaction_kernels,
+        )
+
+
+class Transformer:
+    """A thread-save transformer created from a trained Theia model."""
+
+    def __init__(
+        self,
+        *,
+        num_channels: int,
+        channel_overlap: int,
+        beta: float,
+        contribution_kernels: dict[tuple[int, int], numpy.ndarray],
+        interaction_kernels: dict[tuple[int, int], numpy.ndarray],
+    ) -> None:
+        """This is meant to only be created by Theia.
+
+        Args:
+            num_channels: Same as with Theia.
+            channel_overlap: Same as with Theia.
+            beta: Same as with Theia.
+            contribution_kernels: Learned in Theia.
+            interaction_kernels: Learned in Theia.
+        """
+        self._num_channels = num_channels
+        self._channel_overlap = channel_overlap
+        self._beta = beta
+        self._contribution_kernels = contribution_kernels
+        self._interaction_kernels = interaction_kernels
+
+    @property
+    def num_channels(self) -> int:
+        """The number of channels in each image."""
+        return self._num_channels
+
+    @property
+    def channel_overlap(self) -> int:
+        """The number of adjacent channels to use for bleed-through estimation."""
+        return self._channel_overlap
+
+    @property
+    def contribution_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
+        """Return the fitted contribution kernels."""
+        if len(self._contribution_kernels) == 0:
+            message = "Please call `fit` before using this property."
+            raise ValueError(message)
+        return self._contribution_kernels
+
+    @property
+    def interaction_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
+        """Return the fitted interaction kernels."""
+        if len(self._interaction_kernels) == 0:
+            message = "Please call `fit` before using this property."
+            raise ValueError(message)
+        return self._interaction_kernels
+
     def bleedthrough_component(self, image: numpy.ndarray) -> numpy.ndarray:
         """Compute the bleed-through components for the image."""
         bleed_through = numpy.zeros_like(image)

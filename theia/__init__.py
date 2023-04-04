@@ -1,8 +1,8 @@
 """Expose basics of Theia."""
 
-from . import data
-from . import utils
 from .data import TileGenerator
 from .models import Neural
+from .models import Transformer
+from .utils import constants
 
-__all__ = ["data", "utils", "Neural", "TileGenerator"]
+__all__ = ["Transformer", "Neural", "TileGenerator", "constants"]

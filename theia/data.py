@@ -43,6 +43,8 @@ class TileGenerator(keras_utils.Sequence):  # type: ignore
 
         if normalize:
             images = list(map(_normalize_image, images))
+        else:
+            images = [img / (numpy.max(img) + constants.EPSILON) for img in images]
         self._images = [
             tensorflow.convert_to_tensor(image, dtype=tensorflow.float32)
             for image in images
