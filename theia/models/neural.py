@@ -117,19 +117,17 @@ class Neural(Theia, keras.Model):  # type: ignore
         )
         self.loss_tracker = metrics.Mean(name="theia_loss")
 
-    @property
-    def tile_size(self) -> int:
-        """Side-length of square tiles to use as inputs to the network."""
-        return self._tile_shape[0]
-
-    def build(self, _: typing.Optional[str] = None) -> None:
-        """Default build of Neural Network."""
         super().build(
             [
                 (None, self.tile_size, self.tile_size, 1)
                 for _ in range(self.num_channels)
             ],
         )
+
+    @property
+    def tile_size(self) -> int:
+        """Side-length of square tiles to use as inputs to the network."""
+        return self._tile_shape[0]
 
     def fit_theia(  # type: ignore
         self,
@@ -175,7 +173,7 @@ class Neural(Theia, keras.Model):  # type: ignore
             (i, j): k for (b, i, j), k in named_kernels.items() if b
         }
 
-        self._interaction_kernels = {
+        self._interactions_kernels = {
             (i, j): k for (b, i, j), k in named_kernels.items() if not b
         }
 

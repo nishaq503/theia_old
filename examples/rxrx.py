@@ -12,12 +12,13 @@ from matplotlib import pyplot
 import theia
 
 
-def run_theia(i_experiment: int, i_plate: int) -> None:
+def run_theia(i_experiment: int, i_plate: int, *, force: bool) -> None:
     """Run Theia on a single plate.
 
     Args:
         i_experiment: index of experiment
         i_plate: index of plate
+        force: whether to re-train Theia.
 
     Returns:
         The trained model.
@@ -26,29 +27,34 @@ def run_theia(i_experiment: int, i_plate: int) -> None:
     experiment = experiments[i_experiment]
     plate = plates[i_plate]
 
+    bleedthrough_dir, interaction_dir, corrected_dir, json_path = _get_out_paths(
+        data_root,
+        experiment,
+        plate,
+    )
+
     train_images_, valid_images_ = _read_images(images_dir, experiment, plate)
     train_wells, valid_wells = list(train_images_.keys()), list(valid_images_.keys())
 
     train_images = list(train_images_.values())
     valid_images = list(valid_images_.values())
-    transformer = _train_theia(
-        train_gen=theia.data.TileGenerator(
-            images=train_images,
-            tile_size=512,
-            normalize=False,
-        ),
-        valid_gen=theia.data.TileGenerator(
-            images=valid_images,
-            tile_size=512,
-            normalize=False,
-        ),
-    )
 
-    bleedthrough_dir, interaction_dir, corrected_dir = _get_out_paths(
-        data_root,
-        experiment,
-        plate,
-    )
+    if (not force) and json_path.exists():
+        transformer = theia.Transformer.load(json_path)
+    else:
+        transformer = _train_theia(
+            train_gen=theia.data.TileGenerator(
+                images=train_images,
+                tile_size=512,
+                normalize=False,
+            ),
+            valid_gen=theia.data.TileGenerator(
+                images=valid_images,
+                tile_size=512,
+                normalize=False,
+            ),
+        )
+        transformer.save(json_path)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=8) as executor:
         futures = []
@@ -84,14 +90,14 @@ def _save_one(
     # image = _normalize_image(raw_image)
     image = raw_image / (numpy.max(raw_image) + theia.constants.EPSILON)
 
-    bleedthrough = transformer.bleedthrough_component(image)
-    interaction = transformer.interaction_component(image)
+    bleedthrough = transformer.total_bleedthrough(image)
+    interactions = transformer.total_interactions(image)
     corrected = numpy.clip(image - bleedthrough, a_min=0, a_max=numpy.max(image))
 
     for c in range(6):
         name = f"{well_name}_w{c + 1}.tiff"
         imageio.imwrite(bleedthrough_dir.joinpath(name), bleedthrough[:, :, c])
-        imageio.imwrite(interaction_dir.joinpath(name), interaction[:, :, c])
+        imageio.imwrite(interaction_dir.joinpath(name), interactions[:, :, c])
         imageio.imwrite(corrected_dir.joinpath(name), corrected[:, :, c])
 
 
@@ -125,10 +131,7 @@ def _train_theia(
         verbose=1,
         restore_best_weights=True,
     )
-    model.compile(
-        optimizer="adam",
-    )
-    model.build()
+    model.compile(optimizer="adam")
     model.fit_theia(
         train_gen=train_gen,
         valid_gen=valid_gen,
@@ -161,7 +164,7 @@ def _get_out_paths(
     data_root: pathlib.Path,
     experiment: str,
     plate: str,
-) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
     out_dir = data_root.joinpath("theia_out", experiment, plate)
     out_dir.mkdir(exist_ok=True, parents=True)
 
@@ -174,7 +177,9 @@ def _get_out_paths(
     corrected_dir = out_dir.joinpath("images")
     corrected_dir.mkdir(exist_ok=True)
 
-    return bleedthrough_dir, interaction_dir, corrected_dir
+    json_path = out_dir.joinpath("transformer.json")
+
+    return bleedthrough_dir, interaction_dir, corrected_dir, json_path
 
 
 def _read_images(
@@ -257,7 +262,7 @@ def app() -> None:  # noqa
     data_root, images_dir, experiments, plates = _get_inp_paths()
     experiment, plate = experiments[0], plates[0]
 
-    bleedthrough_dir, interaction_dir, corrected_dir = _get_out_paths(
+    bleedthrough_dir, interaction_dir, corrected_dir, _ = _get_out_paths(
         data_root,
         experiment,
         plate,
@@ -394,5 +399,5 @@ def _overlay(red: numpy.ndarray, cyan: numpy.ndarray) -> numpy.ndarray:
 
 
 if __name__ == "__main__":
-    # run_theia(0, 0)
-    app()
+    run_theia(0, 0, force=True)
+    # app()

@@ -1,6 +1,6 @@
 """Providing two implementations of Theia."""
 
-from .base import Transformer
 from .neural import Neural
+from .transformer import Transformer
 
 __all__ = ["Transformer", "Neural"]

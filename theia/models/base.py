@@ -5,7 +5,8 @@ import pathlib
 import typing
 
 import numpy
-import scipy.ndimage
+
+from .transformer import Transformer
 
 
 class Theia(abc.ABC):
@@ -41,7 +42,7 @@ class Theia(abc.ABC):
         self._beta = beta
 
         self._contribution_kernels: dict[tuple[int, int], numpy.ndarray] = {}
-        self._interaction_kernels: dict[tuple[int, int], numpy.ndarray] = {}
+        self._interactions_kernels: dict[tuple[int, int], numpy.ndarray] = {}
 
     @property
     def num_channels(self) -> int:
@@ -82,12 +83,12 @@ class Theia(abc.ABC):
         return self._contribution_kernels
 
     @property
-    def interaction_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
+    def interactions_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
         """Return the fitted interaction kernels."""
-        if len(self._interaction_kernels) == 0:
+        if len(self._interactions_kernels) == 0:
             message = "Please call `fit` before using this property."
             raise ValueError(message)
-        return self._interaction_kernels
+        return self._interactions_kernels
 
     @property
     def transformer(self) -> "Transformer":
@@ -97,140 +98,5 @@ class Theia(abc.ABC):
             channel_overlap=self.channel_overlap,
             beta=self._beta,
             contribution_kernels=self.contribution_kernels,
-            interaction_kernels=self.interaction_kernels,
+            interactions_kernels=self.interactions_kernels,
         )
-
-
-class Transformer:
-    """A thread-save transformer created from a trained Theia model."""
-
-    def __init__(
-        self,
-        *,
-        num_channels: int,
-        channel_overlap: int,
-        beta: float,
-        contribution_kernels: dict[tuple[int, int], numpy.ndarray],
-        interaction_kernels: dict[tuple[int, int], numpy.ndarray],
-    ) -> None:
-        """This is meant to only be created by Theia.
-
-        Args:
-            num_channels: Same as with Theia.
-            channel_overlap: Same as with Theia.
-            beta: Same as with Theia.
-            contribution_kernels: Learned in Theia.
-            interaction_kernels: Learned in Theia.
-        """
-        self._num_channels = num_channels
-        self._channel_overlap = channel_overlap
-        self._beta = beta
-        self._contribution_kernels = contribution_kernels
-        self._interaction_kernels = interaction_kernels
-
-    @property
-    def num_channels(self) -> int:
-        """The number of channels in each image."""
-        return self._num_channels
-
-    @property
-    def channel_overlap(self) -> int:
-        """The number of adjacent channels to use for bleed-through estimation."""
-        return self._channel_overlap
-
-    @property
-    def contribution_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
-        """Return the fitted contribution kernels."""
-        if len(self._contribution_kernels) == 0:
-            message = "Please call `fit` before using this property."
-            raise ValueError(message)
-        return self._contribution_kernels
-
-    @property
-    def interaction_kernels(self) -> dict[tuple[int, int], numpy.ndarray]:
-        """Return the fitted interaction kernels."""
-        if len(self._interaction_kernels) == 0:
-            message = "Please call `fit` before using this property."
-            raise ValueError(message)
-        return self._interaction_kernels
-
-    def bleedthrough_component(self, image: numpy.ndarray) -> numpy.ndarray:
-        """Compute the bleed-through components for the image."""
-        bleed_through = numpy.zeros_like(image)
-
-        for i_target in range(self.num_channels):
-            neighbor_indices = self._neighbor_indices(i_target)
-
-            neighbors = [image[:, :, i] for i in neighbor_indices]
-            kernels = [
-                self.contribution_kernels[(i_target, i)] for i in neighbor_indices
-            ]
-
-            bleed_through[:, :, i_target] = _compute_contribution(neighbors, kernels)
-
-        return bleed_through
-
-    def interaction_component(self, image: numpy.ndarray) -> numpy.ndarray:
-        """Compute the interaction components for the image."""
-        interaction = numpy.zeros_like(image)
-
-        for i_target in range(self.num_channels):
-            target = image[:, :, i_target]
-
-            neighbor_indices = self._neighbor_indices(i_target)
-
-            neighbors = [image[:, :, i] for i in neighbor_indices]
-            interactions = [self._compute_interaction(target, n) for n in neighbors]
-            kernels = [
-                self.interaction_kernels[(i_target, i)] for i in neighbor_indices
-            ]
-
-            interaction[:, :, i_target] = _compute_contribution(interactions, kernels)
-
-        return interaction
-
-    def transform(
-        self,
-        image: numpy.ndarray,
-        *,
-        remove_interactions: bool = False,
-    ) -> numpy.ndarray:
-        """Transform and return a multichannel image.
-
-        Args:
-            image: A multichannel image with shape (H, W, C) where H is the
-             height, W is the width and C is the number of channels.
-            remove_interactions: Whether to remove interaction components.
-
-        Returns:
-            The corrected image.
-        """
-        bleed_through = self.bleedthrough_component(image)
-
-        if remove_interactions:
-            bleed_through += self.interaction_component(image)
-
-        return numpy.clip(image - bleed_through, a_min=0.0)
-
-    def _neighbor_indices(self, i_target: int) -> list[int]:
-        min_i = max(i_target - self.channel_overlap, 0)
-        max_i = min(i_target + self.channel_overlap, self.num_channels)
-        return [i for i in range(min_i, max_i) if i != i_target]
-
-    def _compute_interaction(
-        self,
-        target: numpy.ndarray,
-        neighbor: numpy.ndarray,
-    ) -> numpy.ndarray:
-        interaction = numpy.power(neighbor, self._beta)
-        interaction = numpy.multiply(target, interaction)
-        interaction = numpy.power(interaction, 1 / (1 + self._beta))
-        return interaction
-
-
-def _compute_contribution(
-    neighbors: list[numpy.ndarray],
-    kernels: list[numpy.ndarray],
-) -> numpy.ndarray:
-    correlations = [scipy.ndimage.correlate(n, k) for n, k in zip(neighbors, kernels)]
-    return numpy.sum(numpy.stack(correlations, axis=0), axis=0)
