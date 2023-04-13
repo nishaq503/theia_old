@@ -64,11 +64,11 @@ class Transformer:
         with json_path.open("r") as reader:
             params = json.load(reader)
         params["contribution_kernels"] = {
-            k: Transformer._list_to_kernel(v)
+            tuple(map(int, k.split("-"))): Transformer._list_to_kernel(v)
             for k, v in params["contribution_kernels"].items()
         }
         params["interactions_kernels"] = {
-            k: Transformer._list_to_kernel(v)
+            tuple(map(int, k.split("-"))): Transformer._list_to_kernel(v)
             for k, v in params["interactions_kernels"].items()
         }
         return Transformer(**params)
@@ -107,7 +107,10 @@ class Transformer:
 
     def bleedthrough_components(self, image: numpy.ndarray) -> numpy.ndarray:
         """Compute the channel-wise bleedthrough components for the image."""
-        bleedthrough = numpy.zeros_like(image)
+        bleedthrough = numpy.stack(
+            [numpy.zeros_like(image) for _ in range(self.num_channels)],
+            axis=-1,
+        )
 
         for i_target in range(self.num_channels):
             neighbor_indices = self._neighbor_indices(i_target)
@@ -117,7 +120,8 @@ class Transformer:
                 self.contribution_kernels[(i_target, i)] for i in neighbor_indices
             ]
 
-            bleedthrough[:, :, i_target] = self._compute_contributions(
+            bleedthrough[:, :, i_target, :] = self._compute_contributions(
+                neighbor_indices,
                 neighbors,
                 kernels,
             )
@@ -129,31 +133,36 @@ class Transformer:
         bleedthrough = self.bleedthrough_components(image)
         return numpy.sum(bleedthrough, axis=-1)
 
-    def interaction_components(self, image: numpy.ndarray) -> numpy.ndarray:
+    def interactions_components(self, image: numpy.ndarray) -> numpy.ndarray:
         """Compute the interaction components for the image."""
-        interactions = numpy.zeros_like(image)
+        bleedthrough = numpy.stack(
+            [numpy.zeros_like(image) for _ in range(self.num_channels)],
+            axis=-1,
+        )
 
         for i_target in range(self.num_channels):
             target = image[:, :, i_target]
 
             neighbor_indices = self._neighbor_indices(i_target)
-
-            neighbors = [image[:, :, i] for i in neighbor_indices]
-            interactions = [self._compute_interaction(target, n) for n in neighbors]
+            interactions = [
+                self._compute_interaction(target, image[:, :, i])
+                for i in neighbor_indices
+            ]
             kernels = [
                 self.interaction_kernels[(i_target, i)] for i in neighbor_indices
             ]
 
-            interactions[:, :, i_target] = self._compute_contributions(
+            bleedthrough[:, :, i_target, :] = self._compute_contributions(
+                neighbor_indices,
                 interactions,
                 kernels,
             )
 
-        return interactions
+        return bleedthrough
 
     def total_interactions(self, image: numpy.ndarray) -> numpy.ndarray:
         """Compute the total interaction components for the image."""
-        interactions = self.interaction_components(image)
+        interactions = self.interactions_components(image)
         return numpy.sum(interactions, axis=-1)
 
     def transform(
@@ -194,13 +203,14 @@ class Transformer:
         interaction = numpy.power(interaction, 1 / (1 + self._beta))
         return interaction
 
-    @staticmethod
     def _compute_contributions(
+        self,
+        indices: list[int],
         neighbors: list[numpy.ndarray],
         kernels: list[numpy.ndarray],
     ) -> numpy.ndarray:
-        # noinspection PyUnresolvedReferences
-        correlations = [
-            scipy.ndimage.correlate(n, k) for n, k in zip(neighbors, kernels)
-        ]
-        return numpy.stack(correlations, axis=1)
+        correlations = numpy.zeros(shape=(*neighbors[0].shape, self.num_channels))
+        for i, n, k in zip(indices, neighbors, kernels):
+            # noinspection PyUnresolvedReferences
+            correlations[:, :, i] = scipy.ndimage.correlate(n, k)
+        return correlations

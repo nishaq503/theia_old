@@ -85,20 +85,34 @@ def _save_one(
     well_name: str,
     paths: tuple[pathlib.Path, pathlib.Path, pathlib.Path],
 ) -> None:
-    bleedthrough_dir, interaction_dir, corrected_dir = paths
+    bleedthrough_dir, interactions_dir, corrected_dir = paths
 
     # image = _normalize_image(raw_image)
     image = raw_image / (numpy.max(raw_image) + theia.constants.EPSILON)
 
-    bleedthrough = transformer.total_bleedthrough(image)
-    interactions = transformer.total_interactions(image)
-    corrected = numpy.clip(image - bleedthrough, a_min=0, a_max=numpy.max(image))
+    bleedthrough_components = transformer.bleedthrough_components(image)
+    interactions_components = transformer.interactions_components(image)
 
-    for c in range(6):
-        name = f"{well_name}_w{c + 1}.tiff"
-        imageio.imwrite(bleedthrough_dir.joinpath(name), bleedthrough[:, :, c])
-        imageio.imwrite(interaction_dir.joinpath(name), interactions[:, :, c])
-        imageio.imwrite(corrected_dir.joinpath(name), corrected[:, :, c])
+    total_bleedthrough = numpy.sum(bleedthrough_components, axis=-1)
+    # total_interactions = numpy.sum(interactions_components, axis=-1)
+    corrected = numpy.clip(image - total_bleedthrough, a_min=0, a_max=numpy.max(image))
+
+    for i in range(6):
+        imageio.imwrite(
+            corrected_dir.joinpath(f"{well_name}_w{i + 1}.tiff"),
+            corrected[:, :, i],
+        )
+
+        for c in range(6):
+            name = f"{well_name}_w{i + 1}_c{c + 1}.tiff"
+            imageio.imwrite(
+                bleedthrough_dir.joinpath(name),
+                bleedthrough_components[:, :, c, i],
+            )
+            imageio.imwrite(
+                interactions_dir.joinpath(name),
+                interactions_components[:, :, c, i],
+            )
 
 
 def _normalize_image(image: numpy.ndarray) -> numpy.ndarray:
@@ -168,18 +182,18 @@ def _get_out_paths(
     out_dir = data_root.joinpath("theia_out", experiment, plate)
     out_dir.mkdir(exist_ok=True, parents=True)
 
-    bleedthrough_dir = out_dir.joinpath("bleed_through_components")
+    bleedthrough_dir = out_dir.joinpath("bleedthrough_components")
     bleedthrough_dir.mkdir(exist_ok=True)
 
-    interaction_dir = out_dir.joinpath("interaction_components")
-    interaction_dir.mkdir(exist_ok=True)
+    interactions_dir = out_dir.joinpath("interactions_components")
+    interactions_dir.mkdir(exist_ok=True)
 
     corrected_dir = out_dir.joinpath("images")
     corrected_dir.mkdir(exist_ok=True)
 
     json_path = out_dir.joinpath("transformer.json")
 
-    return bleedthrough_dir, interaction_dir, corrected_dir, json_path
+    return bleedthrough_dir, interactions_dir, corrected_dir, json_path
 
 
 def _read_images(
@@ -208,12 +222,23 @@ def _get_well_names(plate_dir: pathlib.Path) -> list[str]:
     )
 
 
-def _get_channel_paths(
+def _get_image_paths(
     plate_dir: pathlib.Path,
     well_name: str,
     ext: str,
 ) -> list[pathlib.Path]:
     return [plate_dir.joinpath(f"{well_name}_w{c + 1}.{ext}") for c in range(6)]
+
+
+def _get_channel_paths(
+    plate_dir: pathlib.Path,
+    well_name: str,
+) -> list[pathlib.Path]:
+    return [
+        plate_dir.joinpath(f"{well_name}_w{i + 1}_c{c + 1}.tiff")
+        for i in range(6)
+        for c in range(6)
+    ]
 
 
 def _read_batch(
@@ -227,7 +252,7 @@ def _read_batch(
                 executor.submit(
                     _read_fov,
                     w,
-                    _get_channel_paths(plate_dir, w, "png"),
+                    _get_image_paths(plate_dir, w, "png"),
                 ),
             )
 
@@ -243,7 +268,7 @@ def _read_batch(
 
 
 def _read_fov(well_name: str, paths: list[pathlib.Path]) -> tuple[str, numpy.ndarray]:
-    return well_name, numpy.stack(list(map(_read_single_channel, paths)), axis=2)
+    return well_name, numpy.stack(list(map(_read_single_channel, paths)), axis=-1)
 
 
 def _read_single_channel(path: pathlib.Path) -> numpy.ndarray:
@@ -262,7 +287,7 @@ def app() -> None:  # noqa
     data_root, images_dir, experiments, plates = _get_inp_paths()
     experiment, plate = experiments[0], plates[0]
 
-    bleedthrough_dir, interaction_dir, corrected_dir, _ = _get_out_paths(
+    bleedthrough_dir, interactions_dir, corrected_dir, _ = _get_out_paths(
         data_root,
         experiment,
         plate,
@@ -281,25 +306,36 @@ def app() -> None:  # noqa
     original = list(
         map(
             _read_single_channel,
-            _get_channel_paths(plate_dir, well_name, "png"),
+            _get_image_paths(plate_dir, well_name, "png"),
         ),
     )
-    bleedthrough = list(
+
+    bleedthrough_components = list(
         map(
             _read_single_channel,
-            _get_channel_paths(bleedthrough_dir, well_name, "tiff"),
+            _get_channel_paths(bleedthrough_dir, well_name),
         ),
     )
-    list(
+    bleedthrough = [
+        numpy.sum(numpy.stack(bleedthrough_components[i : i + 6], axis=-1), axis=-1)
+        for i in range(0, len(bleedthrough_components), 6)
+    ]
+
+    interactions_components = list(
         map(
             _read_single_channel,
-            _get_channel_paths(interaction_dir, well_name, "tiff"),
+            _get_channel_paths(interactions_dir, well_name),
         ),
     )
+    interactions = [
+        numpy.sum(numpy.stack(interactions_components[i : i + 6], axis=-1), axis=-1)
+        for i in range(0, len(interactions_components), 6)
+    ]
+
     corrected = list(
         map(
             _read_single_channel,
-            _get_channel_paths(corrected_dir, well_name, "tiff"),
+            _get_image_paths(corrected_dir, well_name, "tiff"),
         ),
     )
 
@@ -312,6 +348,71 @@ def app() -> None:  # noqa
         ax.imshow(_red_channel(img / numpy.max(img) + theia.constants.EPSILON))
         ax.set_title(f"Channel {i}: {c}")
         ax.axis("off")
+    streamlit.pyplot(fig)
+
+    streamlit.write("Channel-wise Bleedthrough Contributions (Normalized)")
+    streamlit.write(
+        "The main diagonal shows total bleedthrough. The off-diagonal images in "
+        "each row show the bleedthrough from the respective channel. For example, "
+        "the image in column 1 of row 4 shows bleedthrough from channel 1 into "
+        "channel 4 normalized by the total bleedthrough into channel 4.",
+    )
+    fig, axs = pyplot.subplots(6, 6, figsize=(18, 18), dpi=256)
+    for i, ax_i in enumerate(axs.T):
+        ax_i[i].imshow(
+            _red_channel(
+                bleedthrough[i]
+                / (numpy.max(bleedthrough[i]) + theia.constants.EPSILON),
+            ),
+        )
+        ax_i[i].axis("off")
+        for j, ax in enumerate(ax_i):
+            if i != j:
+                img = bleedthrough_components[6 * i + j]
+                ax.imshow(
+                    _red_channel(
+                        img / (numpy.max(bleedthrough[i]) + theia.constants.EPSILON),
+                    ),
+                )
+                ax.axis("off")
+    streamlit.pyplot(fig)
+
+    streamlit.write("Channel-wise Bleedthrough Interactions (Normalized)")
+    streamlit.write(
+        "The main diagonal shows total interactions. The off-diagonal images in "
+        "each row show the interaction with the respective channel. For example, "
+        "the image in column 2 of row 5 shows interaction of channel 2 with "
+        "channel 5 normalized by the total interactions into channel 4.",
+    )
+    fig, axs = pyplot.subplots(6, 6, figsize=(18, 18), dpi=256)
+    for i, ax_i in enumerate(axs.T):
+        ax_i[i].imshow(
+            _red_channel(
+                interactions[i]
+                / (numpy.max(interactions[i]) + theia.constants.EPSILON),
+            ),
+        )
+        ax_i[i].axis("off")
+        for j, ax in enumerate(ax_i):
+            if i != j:
+                img = interactions_components[6 * i + j]
+                ax.imshow(
+                    _red_channel(
+                        img / (numpy.max(interactions[i]) + theia.constants.EPSILON),
+                    ),
+                )
+                ax.axis("off")
+    streamlit.pyplot(fig)
+
+    prefixes = ["Original", "Bleedthrough", "Interactions", "Corrected"]
+    streamlit.write(", ".join(prefixes))
+    fig, axs = pyplot.subplots(6, 4, figsize=(12, 18), dpi=256)
+    for i, ax_i in enumerate(axs):
+        images = [original[i], bleedthrough[i], interactions[i], corrected[i]]
+        for j, (ax, img) in enumerate(zip(ax_i, images)):
+            ax.imshow(_red_channel(img / (numpy.max(img) + theia.constants.EPSILON)))
+            ax.set_title(f"{prefixes[j]} {channel_names[i]}")
+            ax.axis("off")
     streamlit.pyplot(fig)
 
     streamlit.write("Overlay of Original channel (Red) with Corrected (Cyan) channel")
@@ -399,5 +500,5 @@ def _overlay(red: numpy.ndarray, cyan: numpy.ndarray) -> numpy.ndarray:
 
 
 if __name__ == "__main__":
-    run_theia(0, 0, force=True)
-    # app()
+    # run_theia(0, 0, force=False)
+    app()
